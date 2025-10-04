@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>跳动爱心</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            background-color: #000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+        
+        .canvas-container {
+            position: relative;
+            width: 840px;
+            height: 680px;
+            overflow: hidden;
+        }
+        
+        canvas {
+            display: block;
+            background-color: #000;
+        }
+    </style>
+</head>
+<body>
+    <div class="canvas-container">
+        <canvas id="heartCanvas" width="840" height="680"></canvas>
+    </div>
+
+    <script>
+        // 配置参数
+        const CANVAS_WIDTH = 840;
+        const CANVAS_HEIGHT = 680;
+        const CANVAS_CENTER_X = CANVAS_WIDTH / 2;
+        const CANVAS_CENTER_Y = CANVAS_HEIGHT / 2;
+        const IMAGE_ENLARGE = 11;
+        
+        let HEART_COLOR = "#EEAEEE";
+        
+        // 心率设置 (BPM - 每分钟心跳次数)
+        let heartRate = 72; // 默认心率
+        let beatInterval = 60000 / heartRate; // 每次心跳的间隔(毫秒)
+        let lastBeatTime = 0;
+        
+        // 获取Canvas上下文
+        const canvas = document.getElementById('heartCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        // 爱心函数
+        function heartFunction(t, shrinkRatio = IMAGE_ENLARGE) {
+            const x = 17 * Math.pow(Math.sin(t), 3);
+            const y = -(16 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(3 * t));
+            
+            const scaledX = x * IMAGE_ENLARGE;
+            const scaledY = y * IMAGE_ENLARGE;
+            
+            const finalX = scaledX + CANVAS_CENTER_X;
+            const finalY = scaledY + CANVAS_CENTER_Y;
+            
+            return [finalX, finalY];
+        }
+        
+        // 随机内部扩散
+        function scatterInside(x, y, beta = 0.15) {
+            const ratioX = -beta * Math.log(Math.random());
+            const ratioY = -beta * Math.log(Math.random());
+            
+            const dx = ratioX * (x - CANVAS_CENTER_X);
+            const dy = ratioY * (y - CANVAS_CENTER_Y);
+            
+            return [x - dx, y - dy];
+        }
+        
+        // 抖动函数
+        function shrink(x, y, ratio) {
+            const force = -1 / Math.pow(Math.pow(x - CANVAS_CENTER_X, 2) + Math.pow(y - CANVAS_CENTER_Y, 2), 0.6);
+            const dx = ratio * force * (x - CANVAS_CENTER_X);
+            const dy = ratio * force * (y - CANVAS_CENTER_Y);
+            return [x - dx, y - dy];
+        }
+        
+        // 曲线函数 - 修改为与心率同步
+        function curve(p) {
+            // 根据心率调整曲线参数，使跳动更自然
+            const rateFactor = heartRate / 72; // 相对于默认72BPM的比例
+            return 2 * (2 * Math.sin(4 * p * rateFactor)) / (2 * Math.PI);
+        }
+        
+        // 爱心类
+        class Heart {
+            constructor(generateFrame = 20) {
+                this._points = new Set();
+                this._edgeDiffusionPoints = new Set();
+                this._centerDiffusionPoints = new Set();
+                this.allPoints = {};
+                this.build(2000);
+                
+                this.randomHalo = 1000;
+                this.generateFrame = generateFrame;
+                
+                for (let frame = 0; frame < generateFrame; frame++) {
+                    this.calc(frame);
+                }
+            }
+            
+            build(number) {
+                // 生成基础爱心点
+                for (let i = 0; i < number; i++) {
+                    const t = Math.random() * 2 * Math.PI;
+                    const [x, y] = heartFunction(t);
+                    this._points.add(`${x},${y}`);
+                }
+                
+                // 边缘扩散点
+                this._points.forEach(point => {
+                    const [x, y] = point.split(',').map(Number);
+                    for (let i = 0; i < 3; i++) {
+                        const [newX, newY] = scatterInside(x, y, 0.05);
+                        this._edgeDiffusionPoints.add(`${newX},${newY}`);
+                    }
+                });
+                
+                // 中心扩散点
+                const pointList = Array.from(this._points);
+                for (let i = 0; i < 10000; i++) {
+                    const randomPoint = pointList[Math.floor(Math.random() * pointList.length)];
+                    const [x, y] = randomPoint.split(',').map(Number);
+                    const [newX, newY] = scatterInside(x, y, 0.27);
+                    this._centerDiffusionPoints.add(`${newX},${newY}`);
+                }
+            }
+            
+            calcPosition(x, y, ratio) {
+                const force = 1 / Math.pow(Math.pow(x - CANVAS_CENTER_X, 2) + Math.pow(y - CANVAS_CENTER_Y, 2), 0.42);
+                
+                const dx = ratio * force * (x - CANVAS_CENTER_X) + (Math.random() * 2 - 1);
+                const dy = ratio * force * (y - CANVAS_CENTER_Y) + (Math.random() * 2 - 1);
+                
+                return [x - dx, y - dy];
+            }
+            
+            calc(generateFrame) {
+                // 根据心率调整动画速度
+                const rateFactor = heartRate / 72;
+                const ratio = 15 * curve(generateFrame / 10 * Math.PI);
+                
+                const haloRadius = 4 + 6 * (1 + curve(generateFrame / 10 * Math.PI));
+                const haloNumber = 3000 + 4000 * Math.abs(Math.pow(curve(generateFrame / 10 * Math.PI), 2));
+                
+                const allPoints = [];
+                
+                // 生成光环点
+                const heartHaloPoint = new Set();
+                for (let i = 0; i < haloNumber; i++) {
+                    const t = Math.random() * 2 * Math.PI;
+                    const [x, y] = heartFunction(t, -15);
+                    const [shrunkX, shrunkY] = shrink(x, y, haloRadius);
+                    
+                    const pointKey = `${shrunkX},${shrunkY}`;
+                    if (!heartHaloPoint.has(pointKey)) {
+                        heartHaloPoint.add(pointKey);
+                        
+                        const offsetX = shrunkX + (Math.random() * 120 - 60);
+                        const offsetY = shrunkY + (Math.random() * 120 - 60);
+                        const size = Math.random() > 0.5 ? 1 : 2;
+                        
+                        allPoints.push({x: offsetX, y: offsetY, size});
+                        
+                        // 添加一些额外的点来增强效果
+                        if (Math.random() > 0.7) {
+                            allPoints.push({x: offsetX + 20, y: offsetY + 20, size});
+                            allPoints.push({x: offsetX - 20, y: offsetY - 20, size});
+                            allPoints.push({x: offsetX + 20, y: offsetY - 20, size});
+                            allPoints.push({x: offsetX - 20, y: offsetY + 20, size});
+                        }
+                    }
+                }
+                
+                // 轮廓点
+                this._points.forEach(point => {
+                    const [x, y] = point.split(',').map(Number);
+                    const [newX, newY] = this.calcPosition(x, y, ratio);
+                    const size = Math.floor(Math.random() * 3) + 1;
+                    allPoints.push({x: newX, y: newY, size});
+                });
+                
+                // 边缘扩散点
+                this._edgeDiffusionPoints.forEach(point => {
+                    const [x, y] = point.split(',').map(Number);
+                    const [newX, newY] = this.calcPosition(x, y, ratio);
+                    const size = Math.floor(Math.random() * 2) + 1;
+                    allPoints.push({x: newX, y: newY, size});
+                });
+                
+                // 中心扩散点
+                this._centerDiffusionPoints.forEach(point => {
+                    const [x, y] = point.split(',').map(Number);
+                    const [newX, newY] = this.calcPosition(x, y, ratio);
+                    const size = Math.floor(Math.random() * 2) + 1;
+                    allPoints.push({x: newX, y: newY, size});
+                });
+                
+                this.allPoints[generateFrame] = allPoints;
+            }
+            
+            render(renderFrame) {
+                const points = this.allPoints[renderFrame % this.generateFrame];
+                if (!points) return;
+                
+                ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+                
+                points.forEach(point => {
+                    ctx.fillStyle = HEART_COLOR;
+                    ctx.fillRect(point.x, point.y, point.size, point.size);
+                });
+            }
+        }
+        
+        // 创建爱心实例
+        const heart = new Heart();
+        let frame = 0;
+        
+        // 动画循环 - 修改为与心率同步
+        function animate(timestamp) {
+            if (!lastBeatTime) {
+                lastBeatTime = timestamp;
+            }
+            
+            const elapsed = timestamp - lastBeatTime;
+            
+            // 检查是否应该进行下一次心跳
+            if (elapsed > beatInterval) {
+                heart.render(frame);
+                frame++;
+                lastBeatTime = timestamp;
+            }
+            
+            requestAnimationFrame(animate);
+        }
+        
+        // 开始动画
+        requestAnimationFrame(animate);
+    </script>
+</body>
+</html>
